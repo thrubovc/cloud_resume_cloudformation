@@ -38,21 +38,15 @@ Resources:
   ResumeVisitorCountDynamo:
     Type: AWS::DynamoDB::Table
     Properties:
-      TableName: test_visitor_counter
+      TableName: visitor_counter
       AttributeDefinitions:
         -
-          AttributeName: 'type'
+          AttributeName: 'visit_count'
           AttributeType: 'S'
-        -
-          AttributeName: 'visits'
-          AttributeType: 'N'
       KeySchema:
         -
-          AttributeName: 'type'
+          AttributeName: 'visit_count'
           KeyType: 'HASH'
-        -
-          AttributeName: 'visits'
-          KeyType: 'RANGE'
       ProvisionedThroughput:
         ReadCapacityUnits: '2'
         WriteCapacityUnits: '2'
@@ -60,9 +54,10 @@ Resources:
   ResumeVisitorCountAPI:
     Type: AWS::ApiGateway::RestApi
     Properties:
-      Name: 'test_visitor_counter'
-      Parameters:
-        endpointConfigurationTypes: REGIONAL
+      Name: 'visitor_counter'
+      EndpointConfiguration:
+        Types:
+          - REGIONAL
 
   ResumeVisitorCountAPIRootGet:
     Type: 'AWS::ApiGateway::Method'
@@ -75,7 +70,8 @@ Resources:
       AuthorizationType: NONE
       Integration:
         Type: AWS_PROXY
-        IntegrationHttpMethod: GET
+        Credentials: !GetAtt ApiGatewayIamRole.Arn
+        IntegrationHttpMethod: POST
         Uri: !Sub >-
           arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${ResumeVisitorCountLambda.Arn}/invocations
 
@@ -92,12 +88,41 @@ Resources:
     Properties:
       RestApiId: !Ref ResumeVisitorCountAPI
 
+  ApiGatewayIamRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - apigateway.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Path: /
+      Policies:
+        - PolicyName: LambdaAccess
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action: lambda:InvokeFunction
+                Resource: !GetAtt ResumeVisitorCountLambda.Arn
+
+  ApiGatewayModel:
+    Type: AWS::ApiGateway::Model
+    Properties:
+      ContentType: 'application/json'
+      RestApiId: !Ref ResumeVisitorCountAPI
+      Schema: {}
+
   ResumeVisitorCountLambda:
     Type: AWS::Lambda::Function
     Properties:
-      Handler: lambda_function
+      Handler: index.lambda_handler
       Runtime: python3.7
-      Role: arn:aws:iam::062169285522:role/service-role/resume_visitor_counter_dynamoDB-role-9jjt8tmu
+      Role: !GetAtt LambdaIAMRole.Arn
       Code:
         ZipFile: |
           import boto3
@@ -107,6 +132,13 @@ Resources:
 
           dynamodb = boto3.resource('dynamodb')
           table = dynamodb.Table('visitor_counter')
+          table.put_item(
+              Item={
+                  'visit_count': 'visit_count',
+                  'visits': 0
+              },
+              ConditionExpression = "attribute_not_exists(visit_count)",
+          )
 
 
           def replace_decimal(obj):
@@ -132,7 +164,7 @@ Resources:
           def lambda_handler(event, context):
               response = table.update_item(
                   Key={
-                      'type': 'count'
+                      'visit_count': 'visit_count'
                   },
                   UpdateExpression='SET visits = visits + :inc',
                   ExpressionAttributeValues={
@@ -153,7 +185,7 @@ Resources:
       TracingConfig:
         Mode: Active
 
-  LambdaRole:
+  LambdaIAMRole:
     Type: AWS::IAM::Role
     Properties:
       ManagedPolicyArns:
@@ -178,4 +210,5 @@ Resources:
                   - "dynamodb:GetItem"
                   - "dynamodb:UpdateItem"
                   - "dynamodb:Query"
+                  - "dynamodb:PutItem"
                 Resource: !GetAtt ResumeVisitorCountDynamo.Arn
