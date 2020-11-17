@@ -3,16 +3,8 @@ Resources:
     Type: 'AWS::S3::Bucket'
     Properties:
       BucketName: test.tomasko.eu
-      LoggingConfiguration:
-        DestinationBucketName: !Ref ResumeAccessLogsS3
       WebsiteConfiguration:
         IndexDocument: index.html
-
-  ResumeAccessLogsS3:
-    Type: 'AWS::S3::Bucket'
-    Properties:
-      BucketName: test-web-access-logs
-      AccessControl: LogDeliveryWrite
 
   ResumeTomaskoEuBucketPolicy:
     Type: 'AWS::S3::BucketPolicy'
@@ -132,13 +124,16 @@ Resources:
 
           dynamodb = boto3.resource('dynamodb')
           table = dynamodb.Table('visitor_counter')
-          table.put_item(
+          try:
+            table.put_item(
               Item={
-                  'visit_count': 'visit_count',
+                'visit_count': 'visit_count',
                   'visits': 0
               },
               ConditionExpression = "attribute_not_exists(visit_count)",
-          )
+            )
+          except dynamodb.meta.client.exceptions.ConditionalCheckFailedException as e:
+            print(e)
 
 
           def replace_decimal(obj):
